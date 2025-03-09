@@ -1,6 +1,6 @@
 USE [AdventureWorks2019]
 GO
-/****** Object:  Table [dbo].[personale1]    Script Date: 09/03/2025 11:02:50 ******/
+/****** Object:  Table [dbo].[personale1]    Script Date: 09/03/2025 12:43:31 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19,6 +19,7 @@ CREATE TABLE [dbo].[personale1](
 	[Demographics] [xml](CONTENT [Person].[IndividualSurveySchemaCollection]) NULL,
 	[rowguid] [uniqueidentifier] NOT NULL,
 	[ModifiedDate] [datetime] NOT NULL,
-	[NEW] [bit] NULL
+	[NEW] [bit] NULL,
+	[new1] [varchar](50) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
