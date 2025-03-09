@@ -1,6 +1,5 @@
 USE [AdventureWorks2019]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_prova_parametro_out]    Script Date: 09/03/2025 12:43:32 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON

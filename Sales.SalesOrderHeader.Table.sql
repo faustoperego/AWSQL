@@ -1,6 +1,5 @@
 USE [AdventureWorks2019]
 GO
-/****** Object:  Table [Sales].[SalesOrderHeader]    Script Date: 09/03/2025 12:43:31 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -37,6 +36,34 @@ CREATE TABLE [Sales].[SalesOrderHeader](
 	[SalesOrderID] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
+GO
+CREATE UNIQUE NONCLUSTERED INDEX [AK_SalesOrderHeader_rowguid] ON [Sales].[SalesOrderHeader]
+(
+	[rowguid] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+SET ARITHABORT ON
+SET CONCAT_NULL_YIELDS_NULL ON
+SET QUOTED_IDENTIFIER ON
+SET ANSI_NULLS ON
+SET ANSI_PADDING ON
+SET ANSI_WARNINGS ON
+SET NUMERIC_ROUNDABORT OFF
+GO
+CREATE UNIQUE NONCLUSTERED INDEX [AK_SalesOrderHeader_SalesOrderNumber] ON [Sales].[SalesOrderHeader]
+(
+	[SalesOrderNumber] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [IX_SalesOrderHeader_CustomerID] ON [Sales].[SalesOrderHeader]
+(
+	[CustomerID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [IX_SalesOrderHeader_SalesPersonID] ON [Sales].[SalesOrderHeader]
+(
+	[SalesPersonID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
 ALTER TABLE [Sales].[SalesOrderHeader] ADD  CONSTRAINT [DF_SalesOrderHeader_RevisionNumber]  DEFAULT ((0)) FOR [RevisionNumber]
 GO
@@ -120,6 +147,82 @@ ALTER TABLE [Sales].[SalesOrderHeader]  WITH CHECK ADD  CONSTRAINT [CK_SalesOrde
 GO
 ALTER TABLE [Sales].[SalesOrderHeader] CHECK CONSTRAINT [CK_SalesOrderHeader_TaxAmt]
 GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TRIGGER [Sales].[uSalesOrderHeader] ON [Sales].[SalesOrderHeader] 
+AFTER UPDATE NOT FOR REPLICATION AS 
+BEGIN
+    DECLARE @Count int;
+
+    SET @Count = @@ROWCOUNT;
+    IF @Count = 0 
+        RETURN;
+
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+        -- Update RevisionNumber for modification of any field EXCEPT the Status.
+        IF NOT UPDATE([Status])
+        BEGIN
+            UPDATE [Sales].[SalesOrderHeader]
+            SET [Sales].[SalesOrderHeader].[RevisionNumber] = 
+                [Sales].[SalesOrderHeader].[RevisionNumber] + 1
+            WHERE [Sales].[SalesOrderHeader].[SalesOrderID] IN 
+                (SELECT inserted.[SalesOrderID] FROM inserted);
+        END;
+
+        -- Update the SalesPerson SalesYTD when SubTotal is updated
+        IF UPDATE([SubTotal])
+        BEGIN
+            DECLARE @StartDate datetime,
+                    @EndDate datetime
+
+            SET @StartDate = [dbo].[ufnGetAccountingStartDate]();
+            SET @EndDate = [dbo].[ufnGetAccountingEndDate]();
+
+            UPDATE [Sales].[SalesPerson]
+            SET [Sales].[SalesPerson].[SalesYTD] = 
+                (SELECT SUM([Sales].[SalesOrderHeader].[SubTotal])
+                FROM [Sales].[SalesOrderHeader] 
+                WHERE [Sales].[SalesPerson].[BusinessEntityID] = [Sales].[SalesOrderHeader].[SalesPersonID]
+                    AND ([Sales].[SalesOrderHeader].[Status] = 5) -- Shipped
+                    AND [Sales].[SalesOrderHeader].[OrderDate] BETWEEN @StartDate AND @EndDate)
+            WHERE [Sales].[SalesPerson].[BusinessEntityID] 
+                IN (SELECT DISTINCT inserted.[SalesPersonID] FROM inserted 
+                    WHERE inserted.[OrderDate] BETWEEN @StartDate AND @EndDate);
+
+            -- Update the SalesTerritory SalesYTD when SubTotal is updated
+            UPDATE [Sales].[SalesTerritory]
+            SET [Sales].[SalesTerritory].[SalesYTD] = 
+                (SELECT SUM([Sales].[SalesOrderHeader].[SubTotal])
+                FROM [Sales].[SalesOrderHeader] 
+                WHERE [Sales].[SalesTerritory].[TerritoryID] = [Sales].[SalesOrderHeader].[TerritoryID]
+                    AND ([Sales].[SalesOrderHeader].[Status] = 5) -- Shipped
+                    AND [Sales].[SalesOrderHeader].[OrderDate] BETWEEN @StartDate AND @EndDate)
+            WHERE [Sales].[SalesTerritory].[TerritoryID] 
+                IN (SELECT DISTINCT inserted.[TerritoryID] FROM inserted 
+                    WHERE inserted.[OrderDate] BETWEEN @StartDate AND @EndDate);
+        END;
+    END TRY
+    BEGIN CATCH
+        EXECUTE [dbo].[uspPrintError];
+
+        -- Rollback any active or uncommittable transactions before
+        -- inserting information in the ErrorLog
+        IF @@TRANCOUNT > 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+        END
+
+        EXECUTE [dbo].[uspLogError];
+    END CATCH;
+END;
+GO
+ALTER TABLE [Sales].[SalesOrderHeader] ENABLE TRIGGER [uSalesOrderHeader]
+GO
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Primary key.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'COLUMN',@level2name=N'SalesOrderID'
 GO
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Incremental number to track changes to the sales order over time.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'COLUMN',@level2name=N'RevisionNumber'
@@ -192,7 +295,17 @@ EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Default constr
 GO
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Primary key (clustered) constraint' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'CONSTRAINT',@level2name=N'PK_SalesOrderHeader_SalesOrderID'
 GO
+EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Unique nonclustered index. Used to support replication samples.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'INDEX',@level2name=N'AK_SalesOrderHeader_rowguid'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Unique nonclustered index.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'INDEX',@level2name=N'AK_SalesOrderHeader_SalesOrderNumber'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Nonclustered index.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'INDEX',@level2name=N'IX_SalesOrderHeader_CustomerID'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Nonclustered index.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'INDEX',@level2name=N'IX_SalesOrderHeader_SalesPersonID'
+GO
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'General sales order information.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'AFTER UPDATE trigger that updates the RevisionNumber and ModifiedDate columns in the SalesOrderHeader table.Updates the SalesYTD column in the SalesPerson and SalesTerritory tables.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'TRIGGER',@level2name=N'uSalesOrderHeader'
 GO
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Foreign key constraint referencing Address.AddressID.' , @level0type=N'SCHEMA',@level0name=N'Sales', @level1type=N'TABLE',@level1name=N'SalesOrderHeader', @level2type=N'CONSTRAINT',@level2name=N'FK_SalesOrderHeader_Address_BillToAddressID'
 GO
