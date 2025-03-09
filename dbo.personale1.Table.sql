@@ -18,6 +18,7 @@ CREATE TABLE [dbo].[personale1](
 	[Demographics] [xml](CONTENT [Person].[IndividualSurveySchemaCollection]) NULL,
 	[rowguid] [uniqueidentifier] NOT NULL,
 	[ModifiedDate] [datetime] NOT NULL,
-	[NEW] [bit] NULL
+	[NEW] [bit] NULL,
+	[cc] [nchar](10) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
